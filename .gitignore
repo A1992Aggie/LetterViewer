@@ -1,0 +1,33 @@
+# Build artifacts
+**/bin/
+**/obj/
+
+# Visual Studio local files
+.vs/
+
+# User-specific files
+*.user
+*.rsuser
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Visual Studio Code settings
+.vscode/
+
+# Resharper cache
+_ReSharper*/
+
+# NuGet packages
+*.nupkg
+packages/
+
+# Logs
+*.log
+
+# OS-specific
+Thumbs.db
+.DS_Store
+
+# Tesseract data
+tessdata/
