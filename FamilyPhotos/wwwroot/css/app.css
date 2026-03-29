@@ -692,6 +692,63 @@ a:hover {
     content: var(--blazor-load-percentage-text, "Loading");
 }
 
+/* ===== Error Toasts ===== */
+.error-toast-container {
+    position: fixed;
+    top: 60px;
+    right: 12px;
+    z-index: 2000;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-width: 420px;
+    width: calc(100% - 24px);
+}
+
+.error-toast {
+    background: #3a1a1a;
+    border: 1px solid var(--danger);
+    border-radius: 8px;
+    padding: 12px 36px 12px 14px;
+    color: #f0c0c0;
+    font-size: 0.85rem;
+    position: relative;
+    animation: slideIn 0.2s ease-out;
+    word-break: break-word;
+}
+
+.error-toast-message {
+    display: block;
+}
+
+.error-toast-time {
+    display: block;
+    font-size: 0.75rem;
+    color: #a07070;
+    margin-top: 4px;
+}
+
+.error-toast-dismiss {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    background: none;
+    border: none;
+    color: #a07070;
+    cursor: pointer;
+    font-size: 0.9rem;
+    padding: 2px;
+}
+
+.error-toast-dismiss:hover {
+    color: #f0c0c0;
+}
+
+@keyframes slideIn {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+
 /* ===== Responsive ===== */
 @media (max-width: 640px) {
     .photo-grid {

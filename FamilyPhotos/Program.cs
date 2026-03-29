@@ -7,6 +7,9 @@ var builder = WebAssemblyHostBuilder.CreateDefault(args);
 builder.RootComponents.Add<App>("#app");
 builder.RootComponents.Add<HeadOutlet>("head::after");
 
+// Suppress expected info-level auth failures that occur before MSAL redirect completes
+builder.Logging.AddFilter("Microsoft.AspNetCore.Authorization", LogLevel.Warning);
+
 // Configure MSAL authentication
 builder.Services.AddMsalAuthentication(options =>
 {
@@ -14,6 +17,7 @@ builder.Services.AddMsalAuthentication(options =>
     options.ProviderOptions.DefaultAccessTokenScopes.Add("https://graph.microsoft.com/Files.ReadWrite");
     options.ProviderOptions.DefaultAccessTokenScopes.Add("https://graph.microsoft.com/User.Read");
     options.ProviderOptions.LoginMode = "redirect";
+    options.ProviderOptions.Cache.CacheLocation = "localStorage";
 });
 
 // Configure authenticated HttpClient for Graph API
@@ -31,6 +35,7 @@ builder.Services.AddScoped(sp =>
 });
 
 // Register services
+builder.Services.AddSingleton<ErrorService>();
 builder.Services.AddScoped<OneDriveService>();
 builder.Services.AddScoped<MetadataService>();
 builder.Services.AddScoped<AudioService>();

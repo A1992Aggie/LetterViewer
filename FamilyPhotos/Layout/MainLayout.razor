@@ -1,17 +1,16 @@
 @inherits LayoutComponentBase
 
 <div class="page">
-    <div class="sidebar">
+    <header class="app-header">
         <NavMenu />
-    </div>
-
-    <main>
-        <div class="top-row px-4">
+        <div class="header-auth">
             <FamilyPhotos.Components.LoginDisplay />
         </div>
-
-        <article class="content px-4">
+    </header>
+    <main>
+        <article class="content">
             @Body
         </article>
     </main>
+    <FamilyPhotos.Components.ErrorDisplay />
 </div>

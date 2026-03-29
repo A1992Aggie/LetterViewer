@@ -19,7 +19,7 @@ public class OneDriveService
     public async Task<List<OneDriveItem>> GetChildrenAsync(string folderId, bool imagesOnly = false)
     {
         var items = new List<OneDriveItem>();
-        var url = $"{GraphBaseUrl}/me/drive/items/{folderId}/children?$top=200&$select=id,name,size,file,folder,lastModifiedDateTime,parentReference,@microsoft.graph.downloadUrl";
+        var url = $"{GraphBaseUrl}/me/drive/items/{folderId}/children?$top=200&$select=id,name,size,file,folder,lastModifiedDateTime,parentReference,@microsoft.graph.downloadUrl&$expand=thumbnails";
 
         while (!string.IsNullOrEmpty(url))
         {
@@ -42,7 +42,7 @@ public class OneDriveService
     public async Task<OneDriveItem?> GetItemAsync(string itemId)
     {
         return await GetAsync<OneDriveItem>(
-            $"{GraphBaseUrl}/me/drive/items/{itemId}?$select=id,name,size,file,folder,lastModifiedDateTime,parentReference,@microsoft.graph.downloadUrl");
+            $"{GraphBaseUrl}/me/drive/items/{itemId}");
     }
 
     public async Task<OneDriveItem?> GetRootAsync()
@@ -148,7 +148,7 @@ public class OneDriveService
     public async Task<OneDriveItem?> FindFileByNameAsync(string parentId, string fileName)
     {
         var escapedName = fileName.Replace("'", "''");
-        var url = $"{GraphBaseUrl}/me/drive/items/{parentId}/children?$filter=name eq '{escapedName}'&$select=id,name,size,file,folder,lastModifiedDateTime,@microsoft.graph.downloadUrl";
+        var url = $"{GraphBaseUrl}/me/drive/items/{parentId}/children?$filter=name eq '{escapedName}'";
 
         var result = await GetAsync<OneDriveItemCollection>(url);
         return result?.Value.FirstOrDefault();
@@ -197,11 +197,22 @@ public class OneDriveService
     {
         try
         {
-            return await _http.GetFromJsonAsync<T>(url);
+            var response = await _http.GetAsync(url);
+            if (!response.IsSuccessStatusCode)
+            {
+                Console.WriteLine($"Graph API error {response.StatusCode}: {url}");
+                return default;
+            }
+            return await response.Content.ReadFromJsonAsync<T>();
         }
         catch (AccessTokenNotAvailableException ex)
         {
             ex.Redirect();
+            return default;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Graph API exception: {ex.Message}");
             return default;
         }
     }
@@ -215,6 +226,11 @@ public class OneDriveService
         catch (AccessTokenNotAvailableException ex)
         {
             ex.Redirect();
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Graph API exception: {ex.Message}");
             return null;
         }
     }

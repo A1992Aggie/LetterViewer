@@ -1,0 +1,28 @@
+@inject ErrorService Errors
+@implements IDisposable
+
+@if (Errors.Errors.Count > 0)
+{
+    <div class="error-toast-container">
+        @foreach (var error in Errors.Errors)
+        {
+            <div class="error-toast">
+                <span class="error-toast-message">@error.Message</span>
+                <span class="error-toast-time">@error.Timestamp.ToString("h:mm:ss tt")</span>
+                <button class="error-toast-dismiss" @onclick="() => Errors.Dismiss(error)">&#10005;</button>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    protected override void OnInitialized()
+    {
+        Errors.OnChange += StateHasChanged;
+    }
+
+    public void Dispose()
+    {
+        Errors.OnChange -= StateHasChanged;
+    }
+}

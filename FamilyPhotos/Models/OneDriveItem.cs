@@ -28,6 +28,12 @@ public class OneDriveItem
     [JsonPropertyName("parentReference")]
     public OneDriveParentReference? ParentReference { get; set; }
 
+    [JsonPropertyName("thumbnails")]
+    public List<ThumbnailSetItem>? Thumbnails { get; set; }
+
+    [JsonIgnore]
+    public string? MediumThumbnailUrl => Thumbnails?.Count > 0 ? Thumbnails[0].Medium?.Url : null;
+
     [JsonIgnore]
     public bool IsFolder => Folder != null;
 

@@ -122,36 +122,34 @@ else
         subfolders = children.Where(c => c.IsFolder).ToList();
         var imageItems = children.Where(c => c.IsImage).ToList();
 
-        // Build photo items with thumbnails and metadata
-        photos = [];
-        foreach (var img in imageItems)
+        // Build photo items immediately using thumbnail URLs already returned by $expand=thumbnails
+        photos = imageItems.Select(img => new PhotoItem
         {
-            var photo = new PhotoItem { DriveItem = img };
-
-            // Use download URL as thumbnail (Graph provides pre-auth URLs)
-            photo.ThumbnailUrl = await OneDrive.GetThumbnailUrlAsync(img.Id) ?? img.DownloadUrl;
-
-            // Try to load existing metadata (don't create on browse - lazy load)
-            var meta = await MetaSvc.LoadMetadataAsync(currentFolderId, img.Name);
-            if (meta != null)
+            DriveItem = img,
+            ThumbnailUrl = img.MediumThumbnailUrl ?? img.DownloadUrl,
+            Metadata = new PhotoMetadata
             {
-                photo.Metadata = meta;
+                PhotoItemId = img.Id,
+                PhotoFileName = img.Name,
+                ExtractedDate = DateParser.ExtractDateFromFileName(img.Name)
             }
-            else
-            {
-                // Create a lightweight placeholder with extracted date
-                photo.Metadata = new PhotoMetadata
-                {
-                    PhotoItemId = img.Id,
-                    PhotoFileName = img.Name,
-                    ExtractedDate = DateParser.ExtractDateFromFileName(img.Name)
-                };
-            }
-
-            photos.Add(photo);
-        }
+        }).ToList();
 
         isLoading = false;
+        StateHasChanged(); // Show thumbnails immediately while metadata loads
+
+        // Load metadata for all photos in parallel instead of sequentially
+        var capturedFolderId = currentFolderId;
+        await Task.WhenAll(photos.Select(async photo =>
+        {
+            var meta = await MetaSvc.LoadMetadataAsync(capturedFolderId, photo.DriveItem.Name);
+            if (meta != null)
+                photo.Metadata = meta;
+        }));
+
+        // Refresh badges only if still on the same folder
+        if (currentFolderId == capturedFolderId)
+            StateHasChanged();
     }
 
     private void OpenPhoto(PhotoItem photo)

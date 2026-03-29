@@ -39,15 +39,6 @@ else if (driveItem != null)
         }
     </div>
 
-    <div id="photo-viewer-main" class="photo-viewer-container">
-        <img src="@driveItem.DownloadUrl" alt="@driveItem.Name" />
-        <FaceTagger Tags="@(metadata?.FaceTags ?? [])"
-                    IsActive="faceTagMode"
-                    ContainerId="photo-viewer-main"
-                    OnTagAdded="AddFaceTag"
-                    OnTagDeleted="DeleteFaceTag" />
-    </div>
-
     @if (showAudio && metadata != null)
     {
         <AudioRecorder Metadata="metadata"
@@ -56,6 +47,15 @@ else if (driveItem != null)
                        UserName="@userName"
                        OnMetadataChanged="OnMetadataUpdated" />
     }
+
+    <div id="photo-viewer-main" class="photo-viewer-container">
+        <img src="@driveItem.DownloadUrl" alt="@driveItem.Name" />
+        <FaceTagger Tags="@(metadata?.FaceTags ?? [])"
+                    IsActive="faceTagMode"
+                    ContainerId="photo-viewer-main"
+                    OnTagAdded="AddFaceTag"
+                    OnTagDeleted="DeleteFaceTag" />
+    </div>
 
     @if (showNotes && metadata != null)
     {
@@ -121,18 +121,24 @@ else if (driveItem != null)
     private async Task LoadPhoto()
     {
         isLoading = true;
+        try
+        {
+            driveItem = await OneDrive.GetItemAsync(ItemId);
+            if (driveItem == null) return;
 
-        driveItem = await OneDrive.GetItemAsync(ItemId);
-        if (driveItem == null) return;
+            metadata = await MetaSvc.GetOrCreateMetadataAsync(FolderId, driveItem.Name, ItemId);
 
-        metadata = await MetaSvc.GetOrCreateMetadataAsync(FolderId, driveItem.Name, ItemId);
+            // Load sibling photos for prev/next navigation
+            var siblings = await OneDrive.GetChildrenAsync(FolderId);
+            siblingIds = siblings.Where(s => s.IsImage).Select(s => s.Id).ToList();
+            currentIndex = siblingIds.IndexOf(ItemId);
 
-        // Load sibling photos for prev/next navigation
-        var siblings = await OneDrive.GetChildrenAsync(FolderId);
-        siblingIds = siblings.Where(s => s.IsImage).Select(s => s.Id).ToList();
-        currentIndex = siblingIds.IndexOf(ItemId);
-
-        isLoading = false;
+            isLoading = false;
+        }
+        catch (AccessTokenNotAvailableException ex)
+        {
+            ex.Redirect();
+        }
     }
 
     [JSInvokable]
