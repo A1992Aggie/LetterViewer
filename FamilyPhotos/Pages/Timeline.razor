@@ -12,7 +12,7 @@
 {
     <div class="empty-state">
         <p>Please select a photos folder in the Gallery first.</p>
-        <button class="btn-accent" @onclick='() => Navigation.NavigateTo("/")'>Go to Gallery</button>
+        <button class="btn-accent" @onclick='() => Navigation.NavigateTo("")'>Go to Gallery</button>
     </div>
 }
 else if (isLoading)
@@ -137,7 +137,7 @@ else
     private void OpenPhoto(PhotoItem photo)
     {
         var folderId = photo.DriveItem.ParentReference?.Id ?? rootFolderId;
-        Navigation.NavigateTo($"/photo/{folderId}/{photo.DriveItem.Id}");
+        Navigation.NavigateTo($"photo/{folderId}/{photo.DriveItem.Id}");
     }
 
     private static string GetMonthName(int month) => month switch

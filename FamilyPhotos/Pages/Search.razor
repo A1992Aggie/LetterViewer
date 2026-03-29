@@ -138,6 +138,6 @@ else
     private void OpenPhoto(PhotoItem photo)
     {
         var folderId = photo.DriveItem.ParentReference?.Id ?? rootFolderId;
-        Navigation.NavigateTo($"/photo/{folderId}/{photo.DriveItem.Id}");
+        Navigation.NavigateTo($"photo/{folderId}/{photo.DriveItem.Id}");
     }
 }

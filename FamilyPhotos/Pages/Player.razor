@@ -203,18 +203,18 @@ else if (driveItem != null)
     private void PreviousPhoto()
     {
         if (hasPreviousPhoto)
-            Navigation.NavigateTo($"/player/{FolderId}/{siblingIds[photoIndex - 1]}");
+            Navigation.NavigateTo($"player/{FolderId}/{siblingIds[photoIndex - 1]}");
     }
 
     private void NextPhoto()
     {
         if (hasNextPhoto)
-            Navigation.NavigateTo($"/player/{FolderId}/{siblingIds[photoIndex + 1]}");
+            Navigation.NavigateTo($"player/{FolderId}/{siblingIds[photoIndex + 1]}");
     }
 
     private void GoBack()
     {
-        Navigation.NavigateTo($"/photo/{FolderId}/{ItemId}");
+        Navigation.NavigateTo($"photo/{FolderId}/{ItemId}");
     }
 
     public async ValueTask DisposeAsync()
