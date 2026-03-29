@@ -1,0 +1,77 @@
+@page "/settings"
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+
+<h2 style="margin-bottom:16px;">Settings</h2>
+
+<div class="settings-section">
+    <h3>Photos Root Folder</h3>
+    <p style="color:var(--text-secondary);font-size:0.9rem;">
+        Currently browsing: <strong>@(rootFolderName ?? "Not set")</strong>
+    </p>
+    <button class="btn-accent" @onclick="ChangeRootFolder">Change Folder</button>
+</div>
+
+<div class="settings-section">
+    <h3>Your Display Name</h3>
+    <p style="color:var(--text-secondary);font-size:0.9rem;">
+        This name will be attached to your audio recordings and face tags.
+    </p>
+    <input class="form-control" style="max-width:300px;" @bind="userName"
+           placeholder="Enter your name" />
+    <button class="btn-accent" style="margin-top:8px;" @onclick="SaveUserName">Save</button>
+    @if (nameSaved)
+    {
+        <span style="color:var(--success);font-size:0.85rem;margin-left:8px;">Saved!</span>
+    }
+</div>
+
+<div class="settings-section">
+    <h3>About</h3>
+    <p style="color:var(--text-secondary);font-size:0.9rem;">
+        Family Photos is a PWA for preserving family memories. Photos are stored in OneDrive
+        and audio recordings, face tags, and notes are saved as metadata files alongside your photos.
+    </p>
+</div>
+
+@if (showFolderPicker)
+{
+    <FolderPicker OnFolderSelected="OnFolderSelected" OnCancelled="() => showFolderPicker = false" />
+}
+
+@code {
+    private string? rootFolderName;
+    private string userName = "";
+    private bool nameSaved;
+    private bool showFolderPicker;
+
+    protected override async Task OnInitializedAsync()
+    {
+        rootFolderName = await JS.InvokeAsync<string?>("localStorage.getItem", "familyphotos_rootFolderName");
+        userName = await JS.InvokeAsync<string?>("localStorage.getItem", "familyphotos_userName") ?? "";
+    }
+
+    private void ChangeRootFolder()
+    {
+        showFolderPicker = true;
+    }
+
+    private async Task OnFolderSelected((string Id, string Name) folder)
+    {
+        await JS.InvokeVoidAsync("localStorage.setItem", "familyphotos_rootFolderId", folder.Id);
+        await JS.InvokeVoidAsync("localStorage.setItem", "familyphotos_rootFolderName", folder.Name);
+        rootFolderName = folder.Name;
+        showFolderPicker = false;
+    }
+
+    private async Task SaveUserName()
+    {
+        await JS.InvokeVoidAsync("localStorage.setItem", "familyphotos_userName", userName);
+        nameSaved = true;
+        StateHasChanged();
+        await Task.Delay(2000);
+        nameSaved = false;
+        StateHasChanged();
+    }
+}

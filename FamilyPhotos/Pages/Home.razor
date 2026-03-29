@@ -1,0 +1,161 @@
+@page "/"
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@inject OneDriveService OneDrive
+@inject MetadataService MetaSvc
+@inject DateParsingService DateParser
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+
+<h2 style="margin-bottom:16px;">Gallery</h2>
+
+@if (showFolderPicker)
+{
+    <FolderPicker OnFolderSelected="OnRootFolderSelected" OnCancelled="() => showFolderPicker = false" />
+}
+
+@if (string.IsNullOrEmpty(rootFolderId))
+{
+    <div class="empty-state">
+        <div class="empty-state-icon">&#128247;</div>
+        <h3>Welcome to Family Photos</h3>
+        <p>Select your OneDrive photos folder to get started.</p>
+        <button class="btn-accent" @onclick="() => showFolderPicker = true">Choose Folder</button>
+    </div>
+}
+else
+{
+    <FolderBreadcrumb Items="breadcrumbs" OnNavigate="NavigateToFolder" />
+
+    @if (isLoading)
+    {
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            Loading...
+        </div>
+    }
+    else
+    {
+        @if (subfolders.Count > 0)
+        {
+            <div style="margin-bottom:16px;">
+                @foreach (var folder in subfolders)
+                {
+                    <div class="folder-item" @onclick="() => NavigateToFolder(folder.Id)">
+                        <span class="folder-icon">&#128193;</span>
+                        <span class="folder-name">@folder.Name</span>
+                        @if (folder.Folder?.ChildCount > 0)
+                        {
+                            <span class="folder-count">@folder.Folder.ChildCount items</span>
+                        }
+                    </div>
+                }
+            </div>
+        }
+
+        @if (photos.Count > 0)
+        {
+            <PhotoGrid Photos="photos" OnPhotoClick="OpenPhoto" />
+        }
+        else if (subfolders.Count == 0)
+        {
+            <div class="empty-state">
+                <div class="empty-state-icon">&#128247;</div>
+                <p>No photos or folders here.</p>
+            </div>
+        }
+    }
+}
+
+@code {
+    private string rootFolderId = "";
+    private string rootFolderName = "";
+    private string currentFolderId = "";
+    private bool isLoading;
+    private bool showFolderPicker;
+    private List<OneDriveItem> subfolders = [];
+    private List<PhotoItem> photos = [];
+    private List<BreadcrumbItem> breadcrumbs = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Try to load saved root folder from localStorage
+        rootFolderId = await JS.InvokeAsync<string?>("localStorage.getItem", "familyphotos_rootFolderId") ?? "";
+        rootFolderName = await JS.InvokeAsync<string?>("localStorage.getItem", "familyphotos_rootFolderName") ?? "Photos";
+
+        if (!string.IsNullOrEmpty(rootFolderId))
+        {
+            currentFolderId = rootFolderId;
+            await LoadCurrentFolder();
+        }
+    }
+
+    private async Task OnRootFolderSelected((string Id, string Name) folder)
+    {
+        rootFolderId = folder.Id;
+        rootFolderName = folder.Name;
+        currentFolderId = folder.Id;
+        showFolderPicker = false;
+
+        await JS.InvokeVoidAsync("localStorage.setItem", "familyphotos_rootFolderId", rootFolderId);
+        await JS.InvokeVoidAsync("localStorage.setItem", "familyphotos_rootFolderName", rootFolderName);
+
+        await LoadCurrentFolder();
+    }
+
+    private async Task NavigateToFolder(string folderId)
+    {
+        currentFolderId = folderId;
+        await LoadCurrentFolder();
+    }
+
+    private async Task LoadCurrentFolder()
+    {
+        isLoading = true;
+        StateHasChanged();
+
+        // Load breadcrumbs
+        breadcrumbs = await OneDrive.GetBreadcrumbAsync(currentFolderId);
+
+        // Load children
+        var children = await OneDrive.GetChildrenAsync(currentFolderId);
+
+        subfolders = children.Where(c => c.IsFolder).ToList();
+        var imageItems = children.Where(c => c.IsImage).ToList();
+
+        // Build photo items with thumbnails and metadata
+        photos = [];
+        foreach (var img in imageItems)
+        {
+            var photo = new PhotoItem { DriveItem = img };
+
+            // Use download URL as thumbnail (Graph provides pre-auth URLs)
+            photo.ThumbnailUrl = await OneDrive.GetThumbnailUrlAsync(img.Id) ?? img.DownloadUrl;
+
+            // Try to load existing metadata (don't create on browse - lazy load)
+            var meta = await MetaSvc.LoadMetadataAsync(currentFolderId, img.Name);
+            if (meta != null)
+            {
+                photo.Metadata = meta;
+            }
+            else
+            {
+                // Create a lightweight placeholder with extracted date
+                photo.Metadata = new PhotoMetadata
+                {
+                    PhotoItemId = img.Id,
+                    PhotoFileName = img.Name,
+                    ExtractedDate = DateParser.ExtractDateFromFileName(img.Name)
+                };
+            }
+
+            photos.Add(photo);
+        }
+
+        isLoading = false;
+    }
+
+    private void OpenPhoto(PhotoItem photo)
+    {
+        Navigation.NavigateTo($"/photo/{currentFolderId}/{photo.DriveItem.Id}");
+    }
+}

@@ -1,0 +1,228 @@
+@page "/player/{FolderId}/{ItemId}"
+@inject OneDriveService OneDrive
+@inject MetadataService MetaSvc
+@inject AudioService AudioSvc
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@implements IAsyncDisposable
+
+@if (isLoading)
+{
+    <div class="loading-spinner">
+        <div class="spinner"></div>
+        Loading...
+    </div>
+}
+else if (driveItem != null)
+{
+    <div class="player-container">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+            <button class="btn-icon" @onclick="GoBack" title="Back">&#8592;</button>
+            <h3 style="margin:0;flex:1;font-size:1rem;">@driveItem.Name</h3>
+            @if (!string.IsNullOrEmpty(metadata?.ExtractedDate))
+            {
+                <span style="color:var(--text-muted);font-size:0.9rem;">@metadata.ExtractedDate</span>
+            }
+        </div>
+
+        <div class="player-photo">
+            <img src="@driveItem.DownloadUrl" alt="@driveItem.Name" />
+
+            @* Show face tags *@
+            @if (metadata?.FaceTags.Count > 0)
+            {
+                <div class="face-tag-overlay">
+                    @foreach (var tag in metadata.FaceTags)
+                    {
+                        <div class="face-tag-marker"
+                             style="left: @(tag.XPercent.ToString("F1"))%; top: @(tag.YPercent.ToString("F1"))%;">
+                            <div class="face-tag-label">@tag.PersonName</div>
+                            <div class="face-tag-dot"></div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+
+        <div class="player-controls">
+            @if (audioRecordings.Count > 0)
+            {
+                <button class="btn-icon" @onclick="TogglePlayPause" title="@(isPlaying ? "Pause" : "Play")">
+                    @(isPlaying ? "\u23F8" : "\u25B6")
+                </button>
+                <button class="btn-icon" @onclick="SkipAudio" title="Skip to next recording" disabled="@(!hasNextAudio)">
+                    &#9197;
+                </button>
+                <div class="player-progress">
+                    Recording @(currentAudioIndex + 1) of @audioRecordings.Count
+                    @if (!string.IsNullOrEmpty(audioRecordings[currentAudioIndex].RecordedBy))
+                    {
+                        <span> - @audioRecordings[currentAudioIndex].RecordedBy</span>
+                    }
+                </div>
+            }
+            else
+            {
+                <span style="color:var(--text-muted);font-size:0.9rem;">No audio recordings for this photo.</span>
+            }
+
+            <div style="margin-left:auto;display:flex;gap:8px;">
+                <button class="btn-icon" @onclick="PreviousPhoto" disabled="@(!hasPreviousPhoto)" title="Previous photo">&#9664;</button>
+                <button class="btn-icon" @onclick="NextPhoto" disabled="@(!hasNextPhoto)" title="Next photo">&#9654;</button>
+            </div>
+        </div>
+
+        <div style="margin-top:4px;">
+            <audio id="player-audio" @ref="audioElement" preload="auto"
+                   @onended="OnAudioEnded"></audio>
+        </div>
+
+        @if (!string.IsNullOrEmpty(metadata?.Notes))
+        {
+            <div class="player-notes">
+                @metadata.Notes
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public string FolderId { get; set; } = "";
+    [Parameter] public string ItemId { get; set; } = "";
+
+    private OneDriveItem? driveItem;
+    private PhotoMetadata? metadata;
+    private bool isLoading = true;
+    private ElementReference audioElement;
+
+    private List<AudioReference> audioRecordings = [];
+    private Dictionary<string, string> audioUrls = [];
+    private int currentAudioIndex;
+    private bool isPlaying;
+    private bool hasNextAudio => currentAudioIndex < audioRecordings.Count - 1;
+
+    private List<string> siblingIds = [];
+    private int photoIndex;
+    private bool hasPreviousPhoto => photoIndex > 0;
+    private bool hasNextPhoto => photoIndex < siblingIds.Count - 1;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadPlayer();
+    }
+
+    private async Task LoadPlayer()
+    {
+        isLoading = true;
+        isPlaying = false;
+        currentAudioIndex = 0;
+
+        driveItem = await OneDrive.GetItemAsync(ItemId);
+        if (driveItem == null) return;
+
+        metadata = await MetaSvc.GetOrCreateMetadataAsync(FolderId, driveItem.Name, ItemId);
+        audioRecordings = metadata?.AudioRecordings ?? [];
+
+        // Load audio URLs
+        audioUrls.Clear();
+        foreach (var rec in audioRecordings)
+        {
+            var url = await AudioSvc.GetPlaybackUrlAsync(rec);
+            if (url != null) audioUrls[rec.Id] = url;
+        }
+
+        // Load siblings
+        var siblings = await OneDrive.GetChildrenAsync(FolderId);
+        siblingIds = siblings.Where(s => s.IsImage).Select(s => s.Id).ToList();
+        photoIndex = siblingIds.IndexOf(ItemId);
+
+        isLoading = false;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Auto-play first recording
+        if (!isLoading && audioRecordings.Count > 0 && !isPlaying && firstRender)
+        {
+            await PlayCurrentAudio();
+        }
+    }
+
+    private async Task PlayCurrentAudio()
+    {
+        if (currentAudioIndex >= audioRecordings.Count) return;
+
+        var rec = audioRecordings[currentAudioIndex];
+        if (audioUrls.TryGetValue(rec.Id, out var url))
+        {
+            await JS.InvokeVoidAsync("eval", $"document.getElementById('player-audio').src = '{url}'; document.getElementById('player-audio').play();");
+            isPlaying = true;
+        }
+    }
+
+    private async Task TogglePlayPause()
+    {
+        if (isPlaying)
+        {
+            await JS.InvokeVoidAsync("eval", "document.getElementById('player-audio').pause();");
+            isPlaying = false;
+        }
+        else
+        {
+            if (audioRecordings.Count > 0)
+            {
+                if (currentAudioIndex >= audioRecordings.Count) currentAudioIndex = 0;
+                await PlayCurrentAudio();
+            }
+        }
+    }
+
+    private async Task SkipAudio()
+    {
+        if (hasNextAudio)
+        {
+            currentAudioIndex++;
+            await PlayCurrentAudio();
+        }
+    }
+
+    private async Task OnAudioEnded()
+    {
+        if (hasNextAudio)
+        {
+            currentAudioIndex++;
+            await PlayCurrentAudio();
+        }
+        else
+        {
+            isPlaying = false;
+        }
+    }
+
+    private void PreviousPhoto()
+    {
+        if (hasPreviousPhoto)
+            Navigation.NavigateTo($"/player/{FolderId}/{siblingIds[photoIndex - 1]}");
+    }
+
+    private void NextPhoto()
+    {
+        if (hasNextPhoto)
+            Navigation.NavigateTo($"/player/{FolderId}/{siblingIds[photoIndex + 1]}");
+    }
+
+    private void GoBack()
+    {
+        Navigation.NavigateTo($"/photo/{FolderId}/{ItemId}");
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("eval", "document.getElementById('player-audio')?.pause();");
+        }
+        catch { }
+    }
+}

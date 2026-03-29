@@ -1,0 +1,168 @@
+@inject IJSRuntime JS
+@inject AudioService AudioSvc
+@implements IAsyncDisposable
+
+<div class="audio-panel">
+    <h4>&#127908; Audio Recordings</h4>
+
+    <div class="recording-controls">
+        <button class="record-btn @(isRecording ? "recording" : "")"
+                @onclick="ToggleRecording"
+                title="@(isRecording ? "Stop recording" : "Start recording")">
+            <div class="record-dot"></div>
+        </button>
+        @if (isRecording)
+        {
+            <span class="recording-timer">@recordingTime.ToString(@"m\:ss")</span>
+            <span style="color:var(--danger);font-size:0.85rem;">Recording...</span>
+        }
+        else
+        {
+            <span style="color:var(--text-muted);font-size:0.85rem;">Tap to record a memory</span>
+        }
+    </div>
+
+    @if (Metadata?.AudioRecordings.Count > 0)
+    {
+        <div class="audio-list">
+            @foreach (var recording in Metadata.AudioRecordings)
+            {
+                <div class="audio-item">
+                    <audio controls preload="none" src="@(audioUrls.GetValueOrDefault(recording.Id, ""))"></audio>
+                    <div class="audio-item-info">
+                        @if (!string.IsNullOrEmpty(recording.RecordedBy))
+                        {
+                            <div>@recording.RecordedBy</div>
+                        }
+                        <div>@recording.RecordedUtc.ToLocalTime().ToString("MMM d, yyyy")</div>
+                        <div>@TimeSpan.FromSeconds(recording.DurationSeconds).ToString(@"m\:ss")</div>
+                    </div>
+                    <button class="btn-danger" @onclick="() => DeleteRecording(recording)"
+                            title="Delete recording">&#128465;</button>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public PhotoMetadata? Metadata { get; set; }
+    [Parameter] public string ParentFolderId { get; set; } = "";
+    [Parameter] public string PhotoFileName { get; set; } = "";
+    [Parameter] public string UserName { get; set; } = "";
+    [Parameter] public EventCallback<PhotoMetadata> OnMetadataChanged { get; set; }
+
+    private IJSObjectReference? jsModule;
+    private DotNetObjectReference<AudioRecorder>? dotNetRef;
+    private bool isRecording;
+    private TimeSpan recordingTime;
+    private System.Threading.Timer? timer;
+    private Dictionary<string, string> audioUrls = [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadAudioUrls();
+    }
+
+    private async Task LoadAudioUrls()
+    {
+        if (Metadata?.AudioRecordings == null) return;
+
+        foreach (var recording in Metadata.AudioRecordings)
+        {
+            if (!audioUrls.ContainsKey(recording.Id))
+            {
+                var url = await AudioSvc.GetPlaybackUrlAsync(recording);
+                if (url != null)
+                    audioUrls[recording.Id] = url;
+            }
+        }
+    }
+
+    private async Task ToggleRecording()
+    {
+        if (isRecording)
+        {
+            await StopRecording();
+        }
+        else
+        {
+            await StartRecording();
+        }
+    }
+
+    private async Task StartRecording()
+    {
+        jsModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/audio-recorder.js");
+        dotNetRef ??= DotNetObjectReference.Create(this);
+
+        var success = await jsModule.InvokeAsync<bool>("startRecording", dotNetRef);
+        if (success)
+        {
+            isRecording = true;
+            recordingTime = TimeSpan.Zero;
+            timer = new System.Threading.Timer(UpdateTimer, null, 0, 1000);
+        }
+    }
+
+    private async Task StopRecording()
+    {
+        if (jsModule != null)
+        {
+            await jsModule.InvokeAsync<bool>("stopRecording");
+        }
+        isRecording = false;
+        timer?.Dispose();
+        timer = null;
+    }
+
+    private void UpdateTimer(object? state)
+    {
+        recordingTime = recordingTime.Add(TimeSpan.FromSeconds(1));
+        InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public async Task OnRecordingComplete(string base64Data, string mimeType, double durationSeconds)
+    {
+        isRecording = false;
+        timer?.Dispose();
+        timer = null;
+
+        if (Metadata == null || string.IsNullOrEmpty(ParentFolderId)) return;
+
+        var audioData = Convert.FromBase64String(base64Data);
+        var recording = await AudioSvc.SaveRecordingAsync(
+            ParentFolderId, PhotoFileName, Metadata,
+            audioData, mimeType, durationSeconds, UserName);
+
+        if (recording != null)
+        {
+            await LoadAudioUrls();
+            await OnMetadataChanged.InvokeAsync(Metadata);
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task DeleteRecording(AudioReference recording)
+    {
+        if (Metadata == null) return;
+
+        await AudioSvc.DeleteRecordingAsync(ParentFolderId, PhotoFileName, Metadata, recording);
+        audioUrls.Remove(recording.Id);
+        await OnMetadataChanged.InvokeAsync(Metadata);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        timer?.Dispose();
+        if (isRecording && jsModule != null)
+        {
+            await jsModule.InvokeAsync<bool>("stopRecording");
+        }
+        dotNetRef?.Dispose();
+        if (jsModule != null)
+            await jsModule.DisposeAsync();
+    }
+}

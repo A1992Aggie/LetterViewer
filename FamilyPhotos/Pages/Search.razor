@@ -1,0 +1,143 @@
+@page "/search"
+@inject OneDriveService OneDrive
+@inject MetadataService MetaSvc
+@inject DateParsingService DateParser
+@inject SearchService SearchSvc
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+
+<h2 style="margin-bottom:16px;">Search</h2>
+
+<div class="search-container">
+    <div class="search-input-wrapper">
+        <span class="search-icon">&#128269;</span>
+        <input class="form-control" type="text" placeholder="Search photos by name, people, notes, date..."
+               @bind="searchQuery" @bind:event="oninput" @bind:after="OnSearchChanged" />
+    </div>
+</div>
+
+@if (!isIndexLoaded)
+{
+    @if (isIndexing)
+    {
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            Building search index... (@indexedCount photos indexed)
+        </div>
+    }
+    else
+    {
+        <div class="empty-state">
+            <div class="empty-state-icon">&#128269;</div>
+            <p>Build a search index to search across all your photos and their metadata.</p>
+            <button class="btn-accent" @onclick="BuildIndex">Build Search Index</button>
+        </div>
+    }
+}
+else
+{
+    @if (!string.IsNullOrWhiteSpace(searchQuery))
+    {
+        <div class="search-results-count">@results.Count result(s) found</div>
+    }
+
+    @if (results.Count > 0)
+    {
+        <PhotoGrid Photos="results" OnPhotoClick="OpenPhoto" />
+    }
+    else if (!string.IsNullOrWhiteSpace(searchQuery))
+    {
+        <div class="empty-state">
+            <p>No photos match your search.</p>
+        </div>
+    }
+    else
+    {
+        <div style="color:var(--text-muted);font-size:0.9rem;margin-top:8px;">
+            @allPhotos.Count photos indexed. Type to search.
+        </div>
+    }
+
+    <div style="margin-top:24px;">
+        <button class="btn btn-sm btn-outline-light" @onclick="BuildIndex">Rebuild Index</button>
+    </div>
+}
+
+@code {
+    private string searchQuery = "";
+    private List<PhotoItem> allPhotos = [];
+    private List<PhotoItem> results = [];
+    private bool isIndexLoaded;
+    private bool isIndexing;
+    private int indexedCount;
+    private string rootFolderId = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        rootFolderId = await JS.InvokeAsync<string?>("localStorage.getItem", "familyphotos_rootFolderId") ?? "";
+    }
+
+    private void OnSearchChanged()
+    {
+        results = SearchSvc.Search(allPhotos, searchQuery);
+    }
+
+    private async Task BuildIndex()
+    {
+        if (string.IsNullOrEmpty(rootFolderId)) return;
+
+        isIndexing = true;
+        indexedCount = 0;
+        allPhotos.Clear();
+
+        await IndexFolderRecursive(rootFolderId, 0, maxDepth: 4);
+
+        isIndexLoaded = true;
+        isIndexing = false;
+        results = allPhotos;
+    }
+
+    private async Task IndexFolderRecursive(string folderId, int depth, int maxDepth)
+    {
+        if (depth > maxDepth) return;
+
+        var children = await OneDrive.GetChildrenAsync(folderId);
+
+        foreach (var item in children)
+        {
+            if (item.IsFolder && depth < maxDepth)
+            {
+                await IndexFolderRecursive(item.Id, depth + 1, maxDepth);
+            }
+            else if (item.IsImage)
+            {
+                indexedCount++;
+                if (indexedCount % 50 == 0)
+                    StateHasChanged();
+
+                var photo = new PhotoItem
+                {
+                    DriveItem = item,
+                    ThumbnailUrl = await OneDrive.GetThumbnailUrlAsync(item.Id) ?? item.DownloadUrl
+                };
+
+                var meta = await MetaSvc.LoadMetadataAsync(folderId, item.Name);
+                photo.Metadata = meta ?? new PhotoMetadata
+                {
+                    PhotoItemId = item.Id,
+                    PhotoFileName = item.Name,
+                    ExtractedDate = DateParser.ExtractDateFromFileName(item.Name)
+                };
+
+                allPhotos.Add(photo);
+            }
+        }
+    }
+
+    private void OpenPhoto(PhotoItem photo)
+    {
+        var folderId = photo.DriveItem.ParentReference?.Id ?? rootFolderId;
+        Navigation.NavigateTo($"/photo/{folderId}/{photo.DriveItem.Id}");
+    }
+}

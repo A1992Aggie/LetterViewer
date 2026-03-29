@@ -1,0 +1,150 @@
+@page "/timeline"
+@inject OneDriveService OneDrive
+@inject MetadataService MetaSvc
+@inject DateParsingService DateParser
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+
+<h2 style="margin-bottom:16px;">Timeline</h2>
+
+@if (string.IsNullOrEmpty(rootFolderId))
+{
+    <div class="empty-state">
+        <p>Please select a photos folder in the Gallery first.</p>
+        <button class="btn-accent" @onclick='() => Navigation.NavigateTo("/")'>Go to Gallery</button>
+    </div>
+}
+else if (isLoading)
+{
+    <div class="loading-spinner">
+        <div class="spinner"></div>
+        Scanning folders... (@photosScanned photos found)
+    </div>
+}
+else
+{
+    <div class="timeline">
+        @foreach (var yearGroup in groupedPhotos)
+        {
+            <div class="timeline-year">
+                <div class="timeline-year-header">@yearGroup.Key</div>
+                @foreach (var monthGroup in yearGroup.Value)
+                {
+                    <div class="timeline-month">
+                        <div class="timeline-month-header">@GetMonthName(monthGroup.Key)</div>
+                        <PhotoGrid Photos="monthGroup.Value" OnPhotoClick="OpenPhoto" />
+                    </div>
+                }
+            </div>
+        }
+
+        @if (undatedPhotos.Count > 0)
+        {
+            <div class="timeline-year">
+                <div class="timeline-year-header">Unknown Date</div>
+                <PhotoGrid Photos="undatedPhotos" OnPhotoClick="OpenPhoto" />
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private string rootFolderId = "";
+    private bool isLoading;
+    private int photosScanned;
+    private SortedDictionary<int, SortedDictionary<int, List<PhotoItem>>> groupedPhotos = new(Comparer<int>.Create((a, b) => b.CompareTo(a)));
+    private List<PhotoItem> undatedPhotos = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        rootFolderId = await JS.InvokeAsync<string?>("localStorage.getItem", "familyphotos_rootFolderId") ?? "";
+
+        if (!string.IsNullOrEmpty(rootFolderId))
+        {
+            await LoadTimeline();
+        }
+    }
+
+    private async Task LoadTimeline()
+    {
+        isLoading = true;
+        photosScanned = 0;
+        groupedPhotos.Clear();
+        undatedPhotos.Clear();
+
+        await ScanFolderRecursive(rootFolderId, 0, maxDepth: 4);
+
+        isLoading = false;
+    }
+
+    private async Task ScanFolderRecursive(string folderId, int depth, int maxDepth)
+    {
+        if (depth > maxDepth) return;
+
+        var children = await OneDrive.GetChildrenAsync(folderId);
+
+        foreach (var item in children)
+        {
+            if (item.IsFolder && depth < maxDepth)
+            {
+                await ScanFolderRecursive(item.Id, depth + 1, maxDepth);
+            }
+            else if (item.IsImage)
+            {
+                photosScanned++;
+                if (photosScanned % 50 == 0)
+                    StateHasChanged();
+
+                var photo = new PhotoItem
+                {
+                    DriveItem = item,
+                    ThumbnailUrl = await OneDrive.GetThumbnailUrlAsync(item.Id) ?? item.DownloadUrl
+                };
+
+                // Try to get metadata or extract date from filename
+                var meta = await MetaSvc.LoadMetadataAsync(folderId, item.Name);
+                var dateStr = meta?.ExtractedDate ?? DateParser.ExtractDateFromFileName(item.Name);
+
+                photo.Metadata = meta ?? new PhotoMetadata
+                {
+                    PhotoItemId = item.Id,
+                    PhotoFileName = item.Name,
+                    ExtractedDate = dateStr
+                };
+
+                var year = DateParser.ExtractYearFromDate(dateStr);
+                var month = DateParser.ExtractMonthFromDate(dateStr) ?? 0;
+
+                if (year.HasValue)
+                {
+                    if (!groupedPhotos.ContainsKey(year.Value))
+                        groupedPhotos[year.Value] = new SortedDictionary<int, List<PhotoItem>>();
+
+                    if (!groupedPhotos[year.Value].ContainsKey(month))
+                        groupedPhotos[year.Value][month] = [];
+
+                    groupedPhotos[year.Value][month].Add(photo);
+                }
+                else
+                {
+                    undatedPhotos.Add(photo);
+                }
+            }
+        }
+    }
+
+    private void OpenPhoto(PhotoItem photo)
+    {
+        var folderId = photo.DriveItem.ParentReference?.Id ?? rootFolderId;
+        Navigation.NavigateTo($"/photo/{folderId}/{photo.DriveItem.Id}");
+    }
+
+    private static string GetMonthName(int month) => month switch
+    {
+        1 => "January", 2 => "February", 3 => "March", 4 => "April",
+        5 => "May", 6 => "June", 7 => "July", 8 => "August",
+        9 => "September", 10 => "October", 11 => "November", 12 => "December",
+        _ => "Unknown Month"
+    };
+}

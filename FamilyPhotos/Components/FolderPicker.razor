@@ -1,0 +1,114 @@
+@inject OneDriveService OneDrive
+
+<div class="folder-picker-overlay" @onclick="Cancel">
+    <div class="folder-picker" @onclick:stopPropagation="true">
+        <h3>Select Photos Root Folder</h3>
+        <p style="color:var(--text-secondary);font-size:0.9rem;">
+            Choose the OneDrive folder that contains your family photos.
+        </p>
+
+        @if (isLoading)
+        {
+            <div class="loading-spinner">
+                <div class="spinner"></div>
+                Loading folders...
+            </div>
+        }
+        else
+        {
+            @if (breadcrumbs.Count > 1)
+            {
+                <div style="margin-bottom:12px;">
+                    <button class="btn btn-sm btn-outline-light" @onclick="NavigateUp">
+                        &#8592; Back
+                    </button>
+                </div>
+            }
+
+            <div style="margin-bottom:12px;color:var(--text-secondary);font-size:0.85rem;">
+                @string.Join(" / ", breadcrumbs.Select(b => b.Name))
+            </div>
+
+            @foreach (var folder in folders)
+            {
+                <div class="folder-item" @onclick="() => NavigateInto(folder)">
+                    <span class="folder-icon">&#128193;</span>
+                    <span class="folder-name">@folder.Name</span>
+                    @if (folder.Folder?.ChildCount > 0)
+                    {
+                        <span class="folder-count">@folder.Folder.ChildCount items</span>
+                    }
+                </div>
+            }
+
+            @if (folders.Count == 0)
+            {
+                <div class="empty-state">
+                    <div>No subfolders here.</div>
+                </div>
+            }
+
+            <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end;">
+                <button class="btn btn-sm btn-outline-light" @onclick="Cancel">Cancel</button>
+                <button class="btn-accent" @onclick="SelectCurrent">
+                    Select This Folder
+                </button>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public EventCallback<(string Id, string Name)> OnFolderSelected { get; set; }
+    [Parameter] public EventCallback OnCancelled { get; set; }
+
+    private List<OneDriveItem> folders = [];
+    private List<BreadcrumbItem> breadcrumbs = [];
+    private string currentFolderId = "";
+    private bool isLoading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var root = await OneDrive.GetRootAsync();
+        if (root != null)
+        {
+            currentFolderId = root.Id;
+            breadcrumbs.Add(new BreadcrumbItem { Name = "OneDrive", ItemId = root.Id });
+            await LoadFolders();
+        }
+    }
+
+    private async Task LoadFolders()
+    {
+        isLoading = true;
+        var children = await OneDrive.GetChildrenAsync(currentFolderId);
+        folders = children.Where(c => c.IsFolder).ToList();
+        isLoading = false;
+    }
+
+    private async Task NavigateInto(OneDriveItem folder)
+    {
+        currentFolderId = folder.Id;
+        breadcrumbs.Add(new BreadcrumbItem { Name = folder.Name, ItemId = folder.Id });
+        await LoadFolders();
+    }
+
+    private async Task NavigateUp()
+    {
+        if (breadcrumbs.Count <= 1) return;
+        breadcrumbs.RemoveAt(breadcrumbs.Count - 1);
+        currentFolderId = breadcrumbs[^1].ItemId;
+        await LoadFolders();
+    }
+
+    private async Task SelectCurrent()
+    {
+        var name = string.Join(" / ", breadcrumbs.Select(b => b.Name));
+        await OnFolderSelected.InvokeAsync((currentFolderId, name));
+    }
+
+    private async Task Cancel()
+    {
+        await OnCancelled.InvokeAsync();
+    }
+}

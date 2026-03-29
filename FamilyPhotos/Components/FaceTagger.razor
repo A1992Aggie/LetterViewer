@@ -1,0 +1,100 @@
+@inject IJSRuntime JS
+
+<div class="face-tag-overlay @(IsActive ? "active" : "")"
+     @onclick="HandleClick">
+
+    @foreach (var tag in Tags)
+    {
+        <div class="face-tag-marker"
+             style="left: @(tag.XPercent.ToString("F1"))%; top: @(tag.YPercent.ToString("F1"))%;">
+            <div class="face-tag-label">
+                @tag.PersonName
+                @if (IsActive)
+                {
+                    <span class="face-tag-delete" @onclick="() => DeleteTag(tag)" @onclick:stopPropagation="true">&#10005;</span>
+                }
+            </div>
+            <div class="face-tag-dot"></div>
+        </div>
+    }
+</div>
+
+@if (showNameInput)
+{
+    <div style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:1001;"
+         @onclick="CancelInput" @onclick:stopPropagation="true">
+        <div style="background:var(--bg-secondary);padding:20px;border-radius:12px;min-width:280px;"
+             @onclick:stopPropagation="true">
+            <h4 style="margin:0 0 12px;">Who is this?</h4>
+            <input class="form-control" @bind="newTagName" @bind:event="oninput"
+                   @onkeydown="HandleNameKeyDown" placeholder="Enter name..." autofocus />
+            <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end;">
+                <button class="btn btn-sm btn-outline-light" @onclick="CancelInput">Cancel</button>
+                <button class="btn-accent" @onclick="ConfirmTag" disabled="@string.IsNullOrWhiteSpace(newTagName)">Save</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public List<FaceTag> Tags { get; set; } = [];
+    [Parameter] public bool IsActive { get; set; }
+    [Parameter] public string ContainerId { get; set; } = "";
+    [Parameter] public EventCallback<FaceTag> OnTagAdded { get; set; }
+    [Parameter] public EventCallback<FaceTag> OnTagDeleted { get; set; }
+
+    private bool showNameInput;
+    private string newTagName = "";
+    private double pendingX;
+    private double pendingY;
+
+    private async Task HandleClick(MouseEventArgs e)
+    {
+        if (!IsActive) return;
+
+        var module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/photo-viewer.js");
+        var coords = await module.InvokeAsync<FaceTagCoords?>("getImageCoordinates", ContainerId, e.ClientX, e.ClientY);
+
+        if (coords != null && coords.XPercent >= 0 && coords.XPercent <= 100 && coords.YPercent >= 0 && coords.YPercent <= 100)
+        {
+            pendingX = coords.XPercent;
+            pendingY = coords.YPercent;
+            newTagName = "";
+            showNameInput = true;
+        }
+    }
+
+    private async Task ConfirmTag()
+    {
+        if (string.IsNullOrWhiteSpace(newTagName)) return;
+
+        var tag = new FaceTag
+        {
+            PersonName = newTagName.Trim(),
+            XPercent = pendingX,
+            YPercent = pendingY,
+            TaggedUtc = DateTime.UtcNow
+        };
+
+        showNameInput = false;
+        await OnTagAdded.InvokeAsync(tag);
+    }
+
+    private async Task DeleteTag(FaceTag tag)
+    {
+        await OnTagDeleted.InvokeAsync(tag);
+    }
+
+    private void CancelInput()
+    {
+        showNameInput = false;
+    }
+
+    private async Task HandleNameKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await ConfirmTag();
+        if (e.Key == "Escape") CancelInput();
+    }
+
+    private record FaceTagCoords(double XPercent, double YPercent);
+}

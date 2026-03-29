@@ -1,0 +1,66 @@
+@inject MetadataService MetaSvc
+
+<div class="notes-panel">
+    <h4>&#128221; Notes</h4>
+    <textarea class="form-control" @bind="notesText" @bind:event="oninput"
+              @bind:after="OnNotesChanged"
+              placeholder="Add notes about this photo, who's in it, where it was taken..."></textarea>
+    <div class="notes-save-status">
+        @if (isSaving)
+        {
+            <span>Saving...</span>
+        }
+        else if (lastSaved.HasValue)
+        {
+            <span>Saved @lastSaved.Value.ToLocalTime().ToString("h:mm tt")</span>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public PhotoMetadata? Metadata { get; set; }
+    [Parameter] public string ParentFolderId { get; set; } = "";
+    [Parameter] public string PhotoFileName { get; set; } = "";
+    [Parameter] public EventCallback<PhotoMetadata> OnMetadataChanged { get; set; }
+
+    private string notesText = "";
+    private bool isSaving;
+    private DateTime? lastSaved;
+    private System.Threading.Timer? debounceTimer;
+    private string? lastSavedText;
+
+    protected override void OnParametersSet()
+    {
+        notesText = Metadata?.Notes ?? "";
+        lastSavedText = notesText;
+    }
+
+    private void OnNotesChanged()
+    {
+        if (notesText == lastSavedText) return;
+
+        debounceTimer?.Dispose();
+        debounceTimer = new System.Threading.Timer(async _ =>
+        {
+            await InvokeAsync(SaveNotes);
+        }, null, 800, Timeout.Infinite);
+    }
+
+    private async Task SaveNotes()
+    {
+        if (Metadata == null || string.IsNullOrEmpty(ParentFolderId)) return;
+        if (notesText == lastSavedText) return;
+
+        isSaving = true;
+        StateHasChanged();
+
+        Metadata.Notes = notesText;
+        await MetaSvc.SaveMetadataAsync(ParentFolderId, PhotoFileName, Metadata);
+
+        lastSavedText = notesText;
+        lastSaved = DateTime.UtcNow;
+        isSaving = false;
+        await OnMetadataChanged.InvokeAsync(Metadata);
+        StateHasChanged();
+    }
+}

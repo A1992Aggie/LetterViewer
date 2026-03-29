@@ -1,0 +1,212 @@
+@page "/photo/{FolderId}/{ItemId}"
+@inject OneDriveService OneDrive
+@inject MetadataService MetaSvc
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@implements IAsyncDisposable
+
+@if (isLoading)
+{
+    <div class="loading-spinner">
+        <div class="spinner"></div>
+        Loading photo...
+    </div>
+}
+else if (driveItem != null)
+{
+    <div class="photo-toolbar">
+        <button class="btn-icon" @onclick="GoBack" title="Back to gallery">&#8592;</button>
+        <button class="btn-icon" @onclick="ResetZoom" title="Reset zoom">&#128269;</button>
+        <span style="font-size:0.85rem;color:var(--text-muted);">@($"{zoomLevel:P0}")</span>
+        <button class="btn-icon @(faceTagMode ? "active" : "")" @onclick="ToggleFaceTagMode" title="Tag faces">&#128100;</button>
+        <button class="btn-icon @(showAudio ? "active" : "")" @onclick="() => showAudio = !showAudio" title="Audio recordings">&#127908;</button>
+        <button class="btn-icon @(showNotes ? "active" : "")" @onclick="() => showNotes = !showNotes" title="Notes">&#128221;</button>
+        <button class="btn-icon" @onclick="OpenPlayer" title="Play slideshow">&#9654;</button>
+
+        <div class="photo-nav">
+            <button class="btn-icon" @onclick="PreviousPhoto" disabled="@(!hasPrevious)" title="Previous">&#9664;</button>
+            <span style="font-size:0.85rem;color:var(--text-muted);">@(currentIndex + 1) / @siblingIds.Count</span>
+            <button class="btn-icon" @onclick="NextPhoto" disabled="@(!hasNext)" title="Next">&#9654;</button>
+        </div>
+    </div>
+
+    <div style="font-size:0.9rem;color:var(--text-secondary);margin-bottom:8px;">
+        @driveItem.Name
+        @if (!string.IsNullOrEmpty(metadata?.ExtractedDate))
+        {
+            <span style="margin-left:12px;color:var(--text-muted);">@metadata.ExtractedDate</span>
+        }
+    </div>
+
+    <div id="photo-viewer-main" class="photo-viewer-container">
+        <img src="@driveItem.DownloadUrl" alt="@driveItem.Name" />
+        <FaceTagger Tags="@(metadata?.FaceTags ?? [])"
+                    IsActive="faceTagMode"
+                    ContainerId="photo-viewer-main"
+                    OnTagAdded="AddFaceTag"
+                    OnTagDeleted="DeleteFaceTag" />
+    </div>
+
+    @if (showAudio && metadata != null)
+    {
+        <AudioRecorder Metadata="metadata"
+                       ParentFolderId="@FolderId"
+                       PhotoFileName="@driveItem.Name"
+                       UserName="@userName"
+                       OnMetadataChanged="OnMetadataUpdated" />
+    }
+
+    @if (showNotes && metadata != null)
+    {
+        <NotesEditor Metadata="metadata"
+                     ParentFolderId="@FolderId"
+                     PhotoFileName="@driveItem.Name"
+                     OnMetadataChanged="OnMetadataUpdated" />
+    }
+}
+
+@code {
+    [Parameter] public string FolderId { get; set; } = "";
+    [Parameter] public string ItemId { get; set; } = "";
+
+    private OneDriveItem? driveItem;
+    private PhotoMetadata? metadata;
+    private bool isLoading = true;
+    private bool faceTagMode;
+    private bool showAudio;
+    private bool showNotes;
+    private double zoomLevel = 1.0;
+    private string userName = "";
+    private IJSObjectReference? jsModule;
+    private DotNetObjectReference<PhotoViewer>? dotNetRef;
+
+    private List<string> siblingIds = [];
+    private int currentIndex;
+    private bool hasPrevious => currentIndex > 0;
+    private bool hasNext => currentIndex < siblingIds.Count - 1;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Get user name from auth state
+        try
+        {
+            var authState = await JS.InvokeAsync<string?>("localStorage.getItem", "familyphotos_userName");
+            userName = authState ?? "";
+        }
+        catch { }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadPhoto();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender || jsModule == null)
+        {
+            jsModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/photo-viewer.js");
+            dotNetRef = DotNetObjectReference.Create(this);
+        }
+
+        if (driveItem != null)
+        {
+            // Small delay to ensure image is rendered
+            await Task.Delay(100);
+            await jsModule.InvokeVoidAsync("initZoomPan", "photo-viewer-main", dotNetRef);
+        }
+    }
+
+    private async Task LoadPhoto()
+    {
+        isLoading = true;
+
+        driveItem = await OneDrive.GetItemAsync(ItemId);
+        if (driveItem == null) return;
+
+        metadata = await MetaSvc.GetOrCreateMetadataAsync(FolderId, driveItem.Name, ItemId);
+
+        // Load sibling photos for prev/next navigation
+        var siblings = await OneDrive.GetChildrenAsync(FolderId);
+        siblingIds = siblings.Where(s => s.IsImage).Select(s => s.Id).ToList();
+        currentIndex = siblingIds.IndexOf(ItemId);
+
+        isLoading = false;
+    }
+
+    [JSInvokable]
+    public void OnZoomChanged(double zoom)
+    {
+        zoomLevel = zoom;
+        InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ResetZoom()
+    {
+        if (jsModule != null)
+        {
+            await jsModule.InvokeVoidAsync("resetZoom", "photo-viewer-main");
+        }
+    }
+
+    private void ToggleFaceTagMode()
+    {
+        faceTagMode = !faceTagMode;
+    }
+
+    private async Task AddFaceTag(FaceTag tag)
+    {
+        if (metadata == null || driveItem == null) return;
+
+        tag.TaggedBy = userName;
+        metadata.FaceTags.Add(tag);
+        await MetaSvc.SaveMetadataAsync(FolderId, driveItem.Name, metadata);
+    }
+
+    private async Task DeleteFaceTag(FaceTag tag)
+    {
+        if (metadata == null || driveItem == null) return;
+
+        metadata.FaceTags.RemoveAll(t => t.Id == tag.Id);
+        await MetaSvc.SaveMetadataAsync(FolderId, driveItem.Name, metadata);
+    }
+
+    private async Task OnMetadataUpdated(PhotoMetadata updated)
+    {
+        metadata = updated;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void PreviousPhoto()
+    {
+        if (hasPrevious)
+            Navigation.NavigateTo($"/photo/{FolderId}/{siblingIds[currentIndex - 1]}");
+    }
+
+    private void NextPhoto()
+    {
+        if (hasNext)
+            Navigation.NavigateTo($"/photo/{FolderId}/{siblingIds[currentIndex + 1]}");
+    }
+
+    private void GoBack()
+    {
+        Navigation.NavigateTo("/");
+    }
+
+    private void OpenPlayer()
+    {
+        Navigation.NavigateTo($"/player/{FolderId}/{ItemId}");
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (jsModule != null)
+        {
+            await jsModule.InvokeVoidAsync("dispose", "photo-viewer-main");
+            await jsModule.DisposeAsync();
+        }
+        dotNetRef?.Dispose();
+    }
+}

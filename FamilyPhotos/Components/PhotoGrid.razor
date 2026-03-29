@@ -1,0 +1,46 @@
+@inject NavigationManager Navigation
+
+<div class="photo-grid">
+    @foreach (var photo in Photos)
+    {
+        <div class="photo-card" @onclick="() => OnPhotoClick.InvokeAsync(photo)">
+            @if (!string.IsNullOrEmpty(photo.ThumbnailUrl))
+            {
+                <img src="@photo.ThumbnailUrl" alt="@photo.DisplayName" loading="lazy" />
+            }
+            else
+            {
+                <div style="width:100%;aspect-ratio:1;background:var(--bg-surface);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:2rem;">
+                    &#128247;
+                </div>
+            }
+            <div class="card-info" title="@photo.DisplayName">@photo.DisplayName</div>
+            @if (photo.AudioCount > 0 || photo.TagCount > 0 || photo.HasNotes || !string.IsNullOrEmpty(photo.ExtractedDate))
+            {
+                <div class="card-badges">
+                    @if (photo.AudioCount > 0)
+                    {
+                        <span class="badge-small">&#127908; @photo.AudioCount</span>
+                    }
+                    @if (photo.TagCount > 0)
+                    {
+                        <span class="badge-small">&#128100; @photo.TagCount</span>
+                    }
+                    @if (photo.HasNotes)
+                    {
+                        <span class="badge-small">&#128221;</span>
+                    }
+                    @if (!string.IsNullOrEmpty(photo.ExtractedDate))
+                    {
+                        <span class="badge-small">@photo.ExtractedDate</span>
+                    }
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public List<PhotoItem> Photos { get; set; } = [];
+    [Parameter] public EventCallback<PhotoItem> OnPhotoClick { get; set; }
+}
